@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>四川观星天气地图 | Sichuan Stargazing Weather Map</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- 高德地图 JS API -->
+    <script>
+        window._AMapSecurityConfig = {
+            securityJsCode: "YOUR_SECURITY_CODE" // 用户需替换为自己的安全密钥
+        };
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=YOUR_AMAP_KEY&plugin=AMap.Driving,AMap.Walking,AMap.Riding,AMap.Transfer,AMap.Geocoder,AMap.MarkerClusterer,AMap.Heatmap,AMap.Scale,AMap.ToolBar,AMap.HawkEye,AMap.MapType,AMap.Geolocation"></script>
+    <!-- Leaflet for dark map tiles (光污染图层叠加) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Chart.js for charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- 加载遮罩 -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>正在初始化四川观星天气地图...</p>
+        </div>
+    </div>
+
+    <!-- 顶部导航栏 -->
+    <header class="top-bar">
+        <div class="logo">
+            <i class="fas fa-star"></i>
+            <span>四川观星天气地图</span>
+        </div>
+        <div class="top-actions">
+            <button id="btnRefresh" class="btn btn-icon" title="刷新数据"><i class="fas fa-sync-alt"></i></button>
+            <button id="btnFullscreen" class="btn btn-icon" title="全屏"><i class="fas fa-expand"></i></button>
+            <button id="btnSettings" class="btn btn-icon" title="设置"><i class="fas fa-cog"></i></button>
+        </div>
+    </header>
+
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 左侧面板：图层控制 + 观星点列表 -->
+        <aside class="left-panel">
+            <!-- 图层控制 -->
+            <div class="panel-section">
+                <div class="section-header" data-toggle="layerControl">
+                    <i class="fas fa-layer-group"></i>
+                    <span>图层控制</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="section-body" id="layerControlBody">
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerWeather" checked>
+                            <span class="layer-name"><i class="fas fa-cloud-sun"></i> 天气图层</span>
+                        </label>
+                        <select id="weatherLayerType" class="layer-select">
+                            <option value="temp">气温</option>
+                            <option value="cloud">云量</option>
+                            <option value="precip">降雨</option>
+                            <option value="wind">风速</option>
+                            <option value="humidity">湿度</option>
+                            <option value="pressure">气压</option>
+                        </select>
+                    </div>
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerLightPollution" checked>
+                            <span class="layer-name"><i class="fas fa-moon"></i> 光污染图层</span>
+                        </label>
+                        <select id="lightPollutionSource" class="layer-select">
+                            <option value="viirs_2024">VIIRS 2024</option>
+                            <option value="viirs_2023">VIIRS 2023</option>
+                            <option value="wa_2015">World Atlas 2015</option>
+                        </select>
+                    </div>
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerStargazing" checked>
+                            <span class="layer-name"><i class="fas fa-telescope"></i> 观星推荐点</span>
+                        </label>
+                    </div>
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerClouds">
+                            <span class="layer-name"><i class="fas fa-smog"></i> 实时云图</span>
+                        </label>
+                    </div>
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerTraffic">
+                            <span class="layer-name"><i class="fas fa-car"></i> 实时路况</span>
+                        </label>
+                    </div>
+                    <div class="layer-item">
+                        <label class="layer-label">
+                            <input type="checkbox" id="layerSatellite">
+                            <span class="layer-name"><i class="fas fa-satellite"></i> 卫星图</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 观星条件筛选 -->
+            <div class="panel-section">
+                <div class="section-header" data-toggle="filterControl">
+                    <i class="fas fa-filter"></i>
+                    <span>观星条件筛选</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="section-body" id="filterControlBody">
+                    <div class="filter-item">
+                        <label>最大云量: <span id="cloudLimitVal">30</span>%</label>
+                        <input type="range" id="cloudLimit" min="0" max="100" value="30" class="filter-slider">
+                    </div>
+                    <div class="filter-item">
+                        <label>最低气温: <span id="tempMinVal">0</span>°C</label>
+                        <input type="range" id="tempMin" min="-20" max="40" value="0" class="filter-slider">
+                    </div>
+                    <div class="filter-item">
+                        <label>最高湿度: <span id="humidityMaxVal">80</span>%</label>
+                        <input type="range" id="humidityMax" min="0" max="100" value="80" class="filter-slider">
+                    </div>
+                    <div class="filter-item">
+                        <label>最大光污染(Bortle): <span id="bortleMaxVal">4</span></label>
+                        <input type="range" id="bortleMax" min="1" max="9" value="4" class="filter-slider">
+                    </div>
+                    <div class="filter-item">
+                        <label>最小能见度: <span id="visibilityMinVal">10</span>km</label>
+                        <input type="range" id="visibilityMin" min="1" max="50" value="10" class="filter-slider">
+                    </div>
+                    <button id="btnApplyFilter" class="btn btn-primary btn-block">
+                        <i class="fas fa-search"></i> 查找适合观星地点
+                    </button>
+                    <div class="filter-presets">
+                        <span class="preset-label">快速预设:</span>
+                        <button class="btn-preset" data-preset="excellent">极佳</button>
+                        <button class="btn-preset" data-preset="good">良好</button>
+                        <button class="btn-preset" data-preset="moderate">一般</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 观星地点列表 -->
+            <div class="panel-section flex-1">
+                <div class="section-header" data-toggle="locationList">
+                    <i class="fas fa-list"></i>
+                    <span>推荐观星地点</span>
+                    <span class="badge" id="locationCount">0</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="section-body scrollable" id="locationListBody">
+                    <div class="empty-state">
+                        <i class="fas fa-star-half-alt"></i>
+                        <p>点击"查找适合观星地点"按钮开始搜索</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 中央地图区域 -->
+        <main class="map-area">
+            <div id="mapContainer" class="map-container"></div>
+
+            <!-- 地图左上角：天气信息卡片 -->
+            <div class="weather-card" id="weatherCard" style="display:none;">
+                <div class="weather-card-header">
+                    <i class="fas fa-map-marker-alt"></i>
+                    <span id="weatherLocationName">--</span>
+                    <button class="btn-close" id="btnCloseWeather"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="weather-card-body">
+                    <div class="weather-main">
+                        <div class="weather-temp" id="weatherTemp">--°C</div>
+                        <div class="weather-desc" id="weatherDesc">--</div>
+                    </div>
+                    <div class="weather-details">
+                        <div class="weather-detail-item">
+                            <i class="fas fa-cloud"></i>
+                            <span>云量: <strong id="weatherCloud">--</strong></span>
+                        </div>
+                        <div class="weather-detail-item">
+                            <i class="fas fa-tint"></i>
+                            <span>湿度: <strong id="weatherHumidity">--</strong></span>
+                        </div>
+                        <div class="weather-detail-item">
+                            <i class="fas fa-wind"></i>
+                            <span>风速: <strong id="weatherWind">--</strong></span>
+                        </div>
+                        <div class="weather-detail-item">
+                            <i class="fas fa-eye"></i>
+                            <span>能见度: <strong id="weatherVisibility">--</strong></span>
+                        </div>
+                        <div class="weather-detail-item">
+                            <i class="fas fa-moon"></i>
+                            <span>Bortle: <strong id="weatherBortle">--</strong></span>
+                        </div>
+                        <div class="weather-detail-item">
+                            <i class="fas fa-star"></i>
+                            <span>观星指数: <strong id="weatherStargazingIdx">--</strong></span>
+                        </div>
+                    </div>
+                    <!-- 24小时预报图表 -->
+                    <div class="weather-chart-container">
+                        <canvas id="hourlyChart" height="80"></canvas>
+                    </div>
+                    <!-- 月相信息 -->
+                    <div class="moon-phase-info">
+                        <i class="fas fa-moon"></i>
+                        <span id="moonPhaseText">--</span>
+                        <span class="moon-illumination" id="moonIllumination">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 地图右上角：图例 -->
+            <div class="map-legend" id="mapLegend">
+                <div class="legend-header">
+                    <span>图例</span>
+                    <button class="btn-close" id="btnCloseLegend"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="legend-body" id="legendBody">
+                    <!-- 动态填充 -->
+                </div>
+            </div>
+
+            <!-- 地图右下角：路径规划面板 -->
+            <div class="route-panel" id="routePanel" style="display:none;">
+                <div class="route-header">
+                    <i class="fas fa-route"></i>
+                    <span>路径规划</span>
+                    <button class="btn-close" id="btnCloseRoute"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="route-body">
+                    <div class="route-inputs">
+                        <div class="route-input-item">
+                            <label><i class="fas fa-circle" style="color:#52c41a"></i> 起点</label>
+                            <input type="text" id="routeStart" placeholder="输入起点地址或点击地图" value="成都市">
+                        </div>
+                        <div class="route-input-item">
+                            <label><i class="fas fa-map-marker-alt" style="color:#f5222d"></i> 终点</label>
+                            <input type="text" id="routeEnd" placeholder="输入终点地址">
+                        </div>
+                        <div class="route-input-item">
+                            <label><i class="fas fa-flag-checkered"></i> 途经点</label>
+                            <input type="text" id="routeWaypoints" placeholder="可选，多个用逗号分隔">
+                        </div>
+                    </div>
+                    <div class="route-options">
+                        <label>出行方式:</label>
+                        <div class="route-mode-tabs">
+                            <button class="route-mode-btn active" data-mode="driving"><i class="fas fa-car"></i> 驾车</button>
+                            <button class="route-mode-btn" data-mode="walking"><i class="fas fa-walking"></i> 步行</button>
+                            <button class="route-mode-btn" data-mode="riding"><i class="fas fa-bicycle"></i> 骑行</button>
+                            <button class="route-mode-btn" data-mode="transit"><i class="fas fa-bus"></i> 公交</button>
+                        </div>
+                    </div>
+                    <div class="route-policy">
+                        <label>策略:</label>
+                        <select id="routePolicy">
+                            <option value="LEAST_TIME">最快路线</option>
+                            <option value="LEAST_DISTANCE">最短距离</option>
+                            <option value="LEAST_FEE">最少费用</option>
+                            <option value="REAL_TRAFFIC">避开拥堵</option>
+                        </select>
+                    </div>
+                    <button id="btnCalculateRoute" class="btn btn-primary btn-block">
+                        <i class="fas fa-calculator"></i> 计算路线
+                    </button>
+                    <div class="route-result" id="routeResult" style="display:none;">
+                        <div class="route-summary">
+                            <div class="route-stat">
+                                <span class="route-stat-value" id="routeDistance">--</span>
+                                <span class="route-stat-label">距离</span>
+                            </div>
+                            <div class="route-stat">
+                                <span class="route-stat-value" id="routeDuration">--</span>
+                                <span class="route-stat-label">耗时</span>
+                            </div>
+                            <div class="route-stat">
+                                <span class="route-stat-value" id="routeToll">--</span>
+                                <span class="route-stat-label">过路费</span>
+                            </div>
+                        </div>
+                        <div class="route-details" id="routeDetails"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 地图左下角：观星指数仪表盘 -->
+            <div class="stargazing-dashboard" id="stargazingDashboard" style="display:none;">
+                <div class="dashboard-header">
+                    <i class="fas fa-star"></i>
+                    <span>观星条件分析</span>
+                </div>
+                <div class="dashboard-body">
+                    <div class="stargazing-score">
+                        <svg viewBox="0 0 120 120" class="score-ring">
+                            <circle cx="60" cy="60" r="50" fill="none" stroke="#333" stroke-width="12"/>
+                            <circle cx="60" cy="60" r="50" fill="none" stroke="url(#scoreGradient)" stroke-width="12"
+                                    stroke-dasharray="314" stroke-dashoffset="314" id="scoreCircle"
+                                    transform="rotate(-90 60 60)" stroke-linecap="round"/>
+                            <defs>
+                                <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#f5222d"/>
+                                    <stop offset="50%" style="stop-color:#faad14"/>
+                                    <stop offset="100%" style="stop-color:#52c41a"/>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <div class="score-value" id="scoreValue">--</div>
+                        <div class="score-label" id="scoreLabel">--</div>
+                    </div>
+                    <div class="stargazing-factors">
+                        <div class="factor-item">
+                            <span class="factor-name">云量</span>
+                            <div class="factor-bar"><div class="factor-fill" id="factorCloud" style="width:0%"></div></div>
+                            <span class="factor-value" id="factorCloudVal">--</span>
+                        </div>
+                        <div class="factor-item">
+                            <span class="factor-name">光污染</span>
+                            <div class="factor-bar"><div class="factor-fill" id="factorLight" style="width:0%"></div></div>
+                            <span class="factor-value" id="factorLightVal">--</span>
+                        </div>
+                        <div class="factor-item">
+                            <span class="factor-name">能见度</span>
+                            <div class="factor-bar"><div class="factor-fill" id="factorVisibility" style="width:0%"></div></div>
+                            <span class="factor-value" id="factorVisibilityVal">--</span>
+                        </div>
+                        <div class="factor-item">
+                            <span class="factor-name">湿度</span>
+                            <div class="factor-bar"><div class="factor-fill" id="factorHumidity" style="width:0%"></div></div>
+                            <span class="factor-value" id="factorHumidityVal">--</span>
+                        </div>
+                        <div class="factor-item">
+                            <span class="factor-name">月相</span>
+                            <div class="factor-bar"><div class="factor-fill" id="factorMoon" style="width:0%"></div></div>
+                            <span class="factor-value" id="factorMoonVal">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部信息条 -->
+            <div class="map-footer">
+                <span id="mapCenterInfo">中心: --</span>
+                <span class="separator">|</span>
+                <span id="lastUpdateTime">最后更新: --</span>
+                <span class="separator">|</span>
+                <span id="dataSources">数据: OpenWeatherMap / 高德地图 / VIIRS</span>
+            </div>
+        </main>
+
+        <!-- 右侧面板：详细信息 + 工具 -->
+        <aside class="right-panel">
+            <!-- 搜索 -->
+            <div class="panel-section">
+                <div class="section-header">
+                    <i class="fas fa-search"></i>
+                    <span>搜索地点</span>
+                </div>
+                <div class="section-body">
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="搜索四川地名/景区/观星点...">
+                        <button id="btnSearch"><i class="fas fa-search"></i></button>
+                    </div>
+                    <div class="search-results" id="searchResults"></div>
+                </div>
+            </div>
+
+            <!-- 四川热门观星点 -->
+            <div class="panel-section">
+                <div class="section-header" data-toggle="hotspotsList">
+                    <i class="fas fa-fire"></i>
+                    <span>四川热门观星点</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="section-body scrollable" id="hotspotsListBody">
+                    <!-- 动态填充 -->
+                </div>
+            </div>
+
+            <!-- 实时数据 -->
+            <div class="panel-section">
+                <div class="section-header" data-toggle="realtimeData">
+                    <i class="fas fa-satellite-dish"></i>
+                    <span>实时气象数据</span>
+                    <i class="fas fa-chevron-down toggle-icon"></i>
+                </div>
+                <div class="section-body" id="realtimeDataBody">
+                    <div class="realtime-grid">
+                        <div class="realtime-item">
+                            <div class="realtime-label">当前位置</div>
+                            <div class="realtime-value" id="rtLocation">点击地图获取</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">气温</div>
+                            <div class="realtime-value" id="rtTemp">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">体感温度</div>
+                            <div class="realtime-value" id="rtFeelsLike">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">天气</div>
+                            <div class="realtime-value" id="rtWeather">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">云量</div>
+                            <div class="realtime-value" id="rtCloud">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">湿度</div>
+                            <div class="realtime-value" id="rtHumidity">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">风速</div>
+                            <div class="realtime-value" id="rtWind">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">气压</div>
+                            <div class="realtime-value" id="rtPressure">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">能见度</div>
+                            <div class="realtime-value" id="rtVisibility">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">紫外线</div>
+                            <div class="realtime-value" id="rtUV">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">日出</div>
+                            <div class="realtime-value" id="rtSunrise">--</div>
+                        </div>
+                        <div class="realtime-item">
+                            <div class="realtime-label">日落</div>
+                            <div class="realtime-value" id="rtSunset">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 路径规划触发 -->
+            <div class="panel-section">
+                <div class="section-header">
+                    <i class="fas fa-route"></i>
+                    <span>路径规划</span>
+                </div>
+                <div class="section-body">
+                    <button id="btnOpenRoute" class="btn btn-primary btn-block">
+                        <i class="fas fa-route"></i> 打开路径规划面板
+                    </button>
+                    <p class="hint-text">提示: 先在地图上点击选择终点，再设置起点</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 设置弹窗 -->
+    <div class="modal-overlay" id="settingsModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>系统设置</span>
+                <button class="btn-close" id="btnCloseSettings"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label>OpenWeatherMap API Key</label>
+                    <input type="text" id="settingOWMKey" placeholder="输入你的 OpenWeatherMap API Key" value="0e2164011fa65df08e305a8312c7d32a">
+                    <p class="hint-text">免费注册: <a href="https://openweathermap.org/api" target="_blank">openweathermap.org/api</a></p>
+                </div>
+                <div class="setting-group">
+                    <label>高德地图 API Key</label>
+                    <input type="text" id="settingAmapKey" placeholder="输入你的高德地图 API Key" value="9c6819c69c55bf5c6f8ecc610909a384">
+                    <p class="hint-text">免费申请: <a href="https://lbs.amap.com/" target="_blank">lbs.amap.com</a></p>
+                </div>
+                <div class="setting-group">
+                    <label>高德安全密钥</label>
+                    <input type="text" id="settingAmapSecurity" placeholder="输入高德安全密钥" value="6f0901b941a2b79bd837badb981cc727">
+                </div>
+                <div class="setting-group">
+                    <label>Light Pollution Map Key</label>
+                    <input type="text" id="settingLPKey" placeholder="输入 lightpollutionmap.info Key" value="YOUR_LP_KEY">
+                    <p class="hint-text">免费申请: <a href="https://www.lightpollutionmap.info" target="_blank">lightpollutionmap.info</a></p>
+                </div>
+                <div class="setting-group">
+                    <label>自动刷新间隔</label>
+                    <select id="settingRefreshInterval">
+                        <option value="0">关闭自动刷新</option>
+                        <option value="300000">5分钟</option>
+                        <option value="600000">10分钟</option>
+                        <option value="1800000" selected>30分钟</option>
+                        <option value="3600000">1小时</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label>温度单位</label>
+                    <select id="settingTempUnit">
+                        <option value="celsius" selected>摄氏度 (°C)</option>
+                        <option value="fahrenheit">华氏度 (°F)</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label>地图主题</label>
+                    <select id="settingMapTheme">
+                        <option value="dark" selected>暗色主题 (推荐观星)</option>
+                        <option value="standard">标准主题</option>
+                        <option value="satellite">卫星主题</option>
+                    </select>
+                </div>
+                <div class="setting-actions">
+                    <button id="btnSaveSettings" class="btn btn-primary">保存设置</button>
+                    <button id="btnResetSettings" class="btn btn-default">恢复默认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 引入应用脚本 -->
+    <script src="app.js"></script>
+</body>
+</html>
